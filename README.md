@@ -5,15 +5,29 @@ Simple local video generator using:
 - edge-tts for speech synthesis
 - ffmpeg for video rendering
 
-## Setup and Run
+## Setup
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+OpenAI script enhancement is optional. Set `OPENAI_API_KEY` in your terminal to enable it; without a key, the original prompt is used as narration.
+
+## Web App
+
+```powershell
 $env:OPENAI_API_KEY = "your_key_here"
+.\.venv\Scripts\python.exe -m streamlit run web.py
+```
+
+## Command Line
+
+```powershell
 .\.venv\Scripts\python.exe App.py --prompt "A cinematic drone shot over a futuristic city at sunrise"
 ```
 
 ## Files
-- App.py - main generator
-- output/ - generated videos
+- `web.py` - Streamlit interface
+- `App.py` - video generation pipeline
+- `output/` - generated videos and audio
