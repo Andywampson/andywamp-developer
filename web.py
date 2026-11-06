@@ -1,7 +1,5 @@
 import subprocess
 import sys
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -85,6 +83,8 @@ if submitted:
             else:
                 st.session_state["generated_video"] = str(OUTPUT_PATH)
                 st.success("Your video is ready.")
+                if "VOICEOVER_FALLBACK:" in result.stdout:
+                    st.warning("Speech service was unavailable; this video contains a tone instead of spoken narration.")
 
 video_path = st.session_state.get("generated_video")
 if video_path and Path(video_path).is_file():

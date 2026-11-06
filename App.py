@@ -62,13 +62,15 @@ def generate_fallback_audio(filename: Path, duration_seconds: float = 12.0, samp
         wav_file.writeframes(pcm.tobytes())
 
 
-async def synthesize_voiceover(text: str, filename: Path, voice: str = DEFAULT_VOICE) -> None:
+async def synthesize_voiceover(text: str, filename: Path, voice: str = DEFAULT_VOICE) -> bool:
     filename.parent.mkdir(parents=True, exist_ok=True)
     communicate = edge_tts.Communicate(text=text, voice=voice)
     try:
         await asyncio.wait_for(communicate.save(str(filename)), timeout=20)
+        return True
     except Exception:
         generate_fallback_audio(filename, duration_seconds=max(8.0, min(18.0, len(text.split()) * 0.55)))
+        return False
 
 
 def assemble_video(
@@ -184,11 +186,23 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = parse_args()
+    if not args.prompt.strip():
+        raise SystemExit("Prompt must not be empty.")
+    if len(args.image) > 5:
+        raise SystemExit("Use at most five scene images.")
+    for image_path in args.image:
+        if not image_path.is_file():
+            raise SystemExit(f"Scene image not found: {image_path}")
+        if image_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+            raise SystemExit(f"Unsupported scene image format: {image_path.suffix}")
+
     output_path = Path(args.output)
     script = build_prompt_script(args.prompt)
     audio_path = output_path.with_suffix(".mp3")
-    await synthesize_voiceover(script, audio_path, voice=args.voice)
+    has_voiceover = await synthesize_voiceover(script, audio_path, voice=args.voice)
     assemble_video(script, audio_path, output_path, image_paths=args.image)
+    if not has_voiceover:
+        print("VOICEOVER_FALLBACK: speech service unavailable; generated audio is a tone.")
 
 
 if __name__ == "__main__":

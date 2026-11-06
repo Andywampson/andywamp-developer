@@ -23,6 +23,8 @@ $env:OPENAI_API_KEY = "your_key_here"
 
 Add up to five JPG, PNG, or WebP photos as video scenes. The local renderer applies a slow pan and zoom; uploaded photos are not sent to OpenAI or ad services. Without photos, the app uses a plain background.
 
+If Edge TTS is unavailable, the video is still created with a fallback tone instead of speech, and the app displays a warning.
+
 ## Command Line
 
 ```powershell
