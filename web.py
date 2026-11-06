@@ -16,7 +16,7 @@ MAX_IMAGE_SIZE = 15 * 1024 * 1024
 st.set_page_config(page_title="AI Video Generator", page_icon="🎬", layout="centered")
 st.title("AI Video Generator")
 st.caption("Create a short narrated video from your concept and photos.")
-st.info("OpenAI receives only the prompt when script enhancement is enabled. Photos are used by the local renderer only.")
+st.info("OpenAI receives only the prompt when script enhancement is enabled. Scene and sponsor images are used by the local renderer only.")
 
 with st.form("video_generator"):
     user_prompt = st.text_area(
@@ -33,7 +33,15 @@ with st.form("video_generator"):
         accept_multiple_files=True,
         help="Optional: add up to five JPG, PNG, or WebP images. Each image must be 15 MB or smaller.",
     )
+    ad_image = st.file_uploader(
+        "Sponsor ad image",
+        type=IMAGE_TYPES,
+        accept_multiple_files=False,
+        help="Optional: add a graphic to show full-screen for three seconds at the end of the video.",
+    )
     submitted = st.form_submit_button("Generate video", type="primary", width="stretch")
+
+st.caption("The sponsor image is an end-card placement only; this app does not connect to ad networks or track earnings.")
 
 if submitted:
     st.session_state.pop("generated_video", None)
@@ -43,6 +51,8 @@ if submitted:
         st.error(f"Upload no more than {MAX_IMAGE_COUNT} scene photos.")
     elif any(image.size > MAX_IMAGE_SIZE for image in uploaded_images):
         st.error("Each scene photo must be 15 MB or smaller.")
+    elif ad_image and ad_image.size > MAX_IMAGE_SIZE:
+        st.error("The sponsor ad image must be 15 MB or smaller.")
     else:
         command = [
             sys.executable,
@@ -61,6 +71,11 @@ if submitted:
                     image_path = Path(temp_dir) / f"scene_{index}{extension}"
                     image_path.write_bytes(uploaded_image.getvalue())
                     command.extend(["--image", str(image_path)])
+                if ad_image:
+                    extension = Path(ad_image.name).suffix.lower()
+                    image_path = Path(temp_dir) / f"sponsor{extension}"
+                    image_path.write_bytes(ad_image.getvalue())
+                    command.extend(["--ad-image", str(image_path)])
 
                 with st.spinner("Creating your narrated video..."):
                     result = subprocess.run(

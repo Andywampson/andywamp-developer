@@ -23,6 +23,8 @@ $env:OPENAI_API_KEY = "your_key_here"
 
 Add up to five JPG, PNG, or WebP photos as video scenes. The local renderer applies a slow pan and zoom; uploaded photos are not sent to OpenAI or ad services. Without photos, the app uses a plain background.
 
+Optionally upload a separate sponsor image to show as a three-second end card. This is only an image placement; it does not connect to an ad network, serve ads, or track revenue.
+
 If Edge TTS is unavailable, the video is still created with a fallback tone instead of speech, and the app displays a warning.
 
 ## Command Line
@@ -32,6 +34,7 @@ If Edge TTS is unavailable, the video is still created with a fallback tone inst
 ```
 
 Use `--image path\to\photo.jpg` to add a scene. Repeat `--image` for up to five scenes.
+Use `--ad-image path\to\sponsor.jpg` to append a three-second sponsor end card. This is placement only; it does not connect to an ad network or track revenue.
 
 ## Files
 - `web.py` - Streamlit interface

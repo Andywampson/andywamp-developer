@@ -14,6 +14,8 @@ from openai import OpenAI
 
 
 DEFAULT_VOICE = "en-US-JennyNeural"
+AD_CARD_DURATION = 3.0
+SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 def build_prompt_script(prompt: str) -> str:
@@ -78,9 +80,11 @@ def assemble_video(
     audio_path: Path,
     output_path: Path,
     image_paths: list[Path] | None = None,
+    ad_image_path: Path | None = None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration = max(6.0, min(22.0, len(prompt.split()) * 0.6))
+    total_duration = duration + AD_CARD_DURATION if ad_image_path else duration
 
     audio_input = str(audio_path.resolve())
     output_target = str(output_path.resolve())
@@ -91,11 +95,15 @@ def assemble_video(
     missing_images = [path for path in image_paths if not path.is_file()]
     if missing_images:
         raise FileNotFoundError(f"Scene image not found: {missing_images[0]}")
+    if ad_image_path and not ad_image_path.is_file():
+        raise FileNotFoundError(f"Ad image not found: {ad_image_path}")
 
     command = [ffmpeg_exe, "-y", "-hide_banner", "-loglevel", "error"]
+    filters = []
+    video_labels = []
+    video_input_count = 0
     if image_paths:
         scene_duration = duration / len(image_paths)
-        filters = []
         for index, image_path in enumerate(image_paths):
             command.extend(
                 [
@@ -116,42 +124,63 @@ def assemble_video(
                 f"y='ih/2-(ih/zoom/2)':d=1:s=1280x720:fps=30,"
                 f"trim=duration={scene_duration:.3f},setpts=PTS-STARTPTS[v{index}]"
             )
-
-        audio_index = len(image_paths)
-        command.extend(["-i", audio_input])
-        scene_inputs = "".join(f"[v{index}]" for index in range(len(image_paths)))
-        filters.append(f"{scene_inputs}concat=n={len(image_paths)}:v=1:a=0[vout]")
-        command.extend(
-            [
-                "-filter_complex",
-                ";".join(filters),
-                "-map",
-                "[vout]",
-                "-map",
-                f"{audio_index}:a:0",
-            ]
-        )
+            video_labels.append(f"[v{index}]")
+        video_input_count = len(image_paths)
     else:
         command.extend(
             [
                 "-f",
                 "lavfi",
+                "-t",
+                f"{duration:.3f}",
                 "-i",
                 f"color=c=0x1f2937:s=1280x720:d={duration}",
-                "-i",
-                audio_input,
-                "-map",
-                "0:v:0",
-                "-map",
-                "1:a:0",
             ]
         )
+        video_input_count = 1
+        if ad_image_path:
+            filters.append(f"[0:v]trim=duration={duration:.3f},setpts=PTS-STARTPTS[v0]")
+            video_labels.append("[v0]")
+
+    if ad_image_path:
+        ad_index = video_input_count
+        command.extend(
+            [
+                "-loop",
+                "1",
+                "-framerate",
+                "30",
+                "-t",
+                f"{AD_CARD_DURATION:.3f}",
+                "-i",
+                str(ad_image_path.resolve()),
+            ]
+        )
+        filters.append(
+            f"[{ad_index}:v]scale=1280:720:force_original_aspect_ratio=decrease,"
+            f"pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,"
+            f"trim=duration={AD_CARD_DURATION:.3f},setpts=PTS-STARTPTS[ad]"
+        )
+        video_labels.append("[ad]")
+        video_input_count += 1
+
+    audio_index = video_input_count
+    command.extend(["-i", audio_input])
+    if image_paths or ad_image_path:
+        scene_inputs = "".join(video_labels)
+        filters.append(f"{scene_inputs}concat=n={len(video_labels)}:v=1:a=0[vout]")
+        command.extend(["-filter_complex", ";".join(filters), "-map", "[vout]"])
+    else:
+        command.extend(["-map", "0:v:0"])
+    command.extend(["-map", f"{audio_index}:a:0"])
+    if ad_image_path:
+        command.extend(["-af", f"apad=whole_dur={total_duration:.3f}"])
 
     command.extend(
         [
             "-shortest",
             "-t",
-            f"{duration:.3f}",
+            f"{total_duration:.3f}",
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -181,6 +210,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Scene image path; repeat the option to add up to five images.",
     )
+    parser.add_argument("--ad-image", type=Path, help="Optional full-screen sponsor card shown at the end.")
     return parser.parse_args()
 
 
@@ -190,17 +220,22 @@ async def main() -> None:
         raise SystemExit("Prompt must not be empty.")
     if len(args.image) > 5:
         raise SystemExit("Use at most five scene images.")
+    if args.ad_image:
+        if not args.ad_image.is_file():
+            raise SystemExit(f"Ad image not found: {args.ad_image}")
+        if args.ad_image.suffix.lower() not in SUPPORTED_IMAGE_SUFFIXES:
+            raise SystemExit(f"Unsupported ad image format: {args.ad_image.suffix}")
     for image_path in args.image:
         if not image_path.is_file():
             raise SystemExit(f"Scene image not found: {image_path}")
-        if image_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+        if image_path.suffix.lower() not in SUPPORTED_IMAGE_SUFFIXES:
             raise SystemExit(f"Unsupported scene image format: {image_path.suffix}")
 
     output_path = Path(args.output)
     script = build_prompt_script(args.prompt)
     audio_path = output_path.with_suffix(".mp3")
     has_voiceover = await synthesize_voiceover(script, audio_path, voice=args.voice)
-    assemble_video(script, audio_path, output_path, image_paths=args.image)
+    assemble_video(script, audio_path, output_path, image_paths=args.image, ad_image_path=args.ad_image)
     if not has_voiceover:
         print("VOICEOVER_FALLBACK: speech service unavailable; generated audio is a tone.")
 
