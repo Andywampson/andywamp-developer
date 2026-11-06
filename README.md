@@ -21,11 +21,15 @@ $env:OPENAI_API_KEY = "your_key_here"
 .\.venv\Scripts\python.exe -m streamlit run web.py
 ```
 
+Add up to five JPG, PNG, or WebP photos as video scenes. The local renderer applies a slow pan and zoom; uploaded photos are not sent to OpenAI or ad services. Without photos, the app uses a plain background.
+
 ## Command Line
 
 ```powershell
 .\.venv\Scripts\python.exe App.py --prompt "A cinematic drone shot over a futuristic city at sunrise"
 ```
+
+Use `--image path\to\photo.jpg` to add a scene. Repeat `--image` for up to five scenes.
 
 ## Files
 - `web.py` - Streamlit interface

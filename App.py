@@ -71,31 +71,99 @@ async def synthesize_voiceover(text: str, filename: Path, voice: str = DEFAULT_V
         generate_fallback_audio(filename, duration_seconds=max(8.0, min(18.0, len(text.split()) * 0.55)))
 
 
-def assemble_video(prompt: str, audio_path: Path, output_path: Path) -> None:
+def assemble_video(
+    prompt: str,
+    audio_path: Path,
+    output_path: Path,
+    image_paths: list[Path] | None = None,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration = max(6.0, min(22.0, len(prompt.split()) * 0.6))
 
     audio_input = str(audio_path.resolve())
     output_target = str(output_path.resolve())
     ffmpeg_exe = get_ffmpeg_exe()
-    command = [
-        ffmpeg_exe,
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        f"color=c=0x1f2937:s=1280x720:d={duration}",
-        "-i",
-        audio_input,
-        "-shortest",
-        "-c:v",
-        "libx264",
-        "-c:a",
-        "aac",
-        output_target,
-    ]
+    image_paths = image_paths or []
+    if len(image_paths) > 5:
+        raise ValueError("Use at most five scene images.")
+    missing_images = [path for path in image_paths if not path.is_file()]
+    if missing_images:
+        raise FileNotFoundError(f"Scene image not found: {missing_images[0]}")
 
-    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    command = [ffmpeg_exe, "-y", "-hide_banner", "-loglevel", "error"]
+    if image_paths:
+        scene_duration = duration / len(image_paths)
+        filters = []
+        for index, image_path in enumerate(image_paths):
+            command.extend(
+                [
+                    "-loop",
+                    "1",
+                    "-framerate",
+                    "30",
+                    "-t",
+                    f"{scene_duration:.3f}",
+                    "-i",
+                    str(image_path.resolve()),
+                ]
+            )
+            filters.append(
+                f"[{index}:v]scale=1280:720:force_original_aspect_ratio=increase,"
+                f"crop=1280:720,setsar=1,"
+                f"zoompan=z='min(zoom+0.0005,1.08)':x='iw/2-(iw/zoom/2)':"
+                f"y='ih/2-(ih/zoom/2)':d=1:s=1280x720:fps=30,"
+                f"trim=duration={scene_duration:.3f},setpts=PTS-STARTPTS[v{index}]"
+            )
+
+        audio_index = len(image_paths)
+        command.extend(["-i", audio_input])
+        scene_inputs = "".join(f"[v{index}]" for index in range(len(image_paths)))
+        filters.append(f"{scene_inputs}concat=n={len(image_paths)}:v=1:a=0[vout]")
+        command.extend(
+            [
+                "-filter_complex",
+                ";".join(filters),
+                "-map",
+                "[vout]",
+                "-map",
+                f"{audio_index}:a:0",
+            ]
+        )
+    else:
+        command.extend(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=0x1f2937:s=1280x720:d={duration}",
+                "-i",
+                audio_input,
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+            ]
+        )
+
+    command.extend(
+        [
+            "-shortest",
+            "-t",
+            f"{duration:.3f}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            output_target,
+        ]
+    )
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-4000:] or "FFmpeg could not assemble the video.")
     print(f"Video created: {output_target}")
 
 
@@ -104,6 +172,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", required=True, help="Prompt to turn into a video.")
     parser.add_argument("--output", default="output/final_video.mp4", help="Output path for the generated video.")
     parser.add_argument("--voice", default=DEFAULT_VOICE, help="TTS voice name to use.")
+    parser.add_argument(
+        "--image",
+        action="append",
+        type=Path,
+        default=[],
+        help="Scene image path; repeat the option to add up to five images.",
+    )
     return parser.parse_args()
 
 
@@ -113,7 +188,7 @@ async def main() -> None:
     script = build_prompt_script(args.prompt)
     audio_path = output_path.with_suffix(".mp3")
     await synthesize_voiceover(script, audio_path, voice=args.voice)
-    assemble_video(script, audio_path, output_path)
+    assemble_video(script, audio_path, output_path, image_paths=args.image)
 
 
 if __name__ == "__main__":
